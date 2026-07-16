@@ -45,7 +45,9 @@ static int options_init(Options *opts) {
     opts->fixed_len = -1;
     opts->count = 1;
     opts->delimiters = strdup(":=");
-    if(!opts->delimiters) return -1;
+    if(!opts->delimiters) {
+        return -1;
+    }
     return 0;
 }
 
@@ -54,4 +56,83 @@ static void options_free(Options *opts) {
     free(opts->alphabet_str);
     free(opts->probs);
     free(opts->delimiters);
+}
+
+// Проверка, является ли символ допустимым разделителем
+static bool is_delimiter(const Options *opts, char c) {
+    return strchr(opts->delimiters, c) != NULL;
+}
+
+// Добавление разделителя (для -d)
+static int add_delimiter(Options *opts, char c) {
+    size_t len = strlen(opts->delimiters);
+    char *new_del = realloc(opts->delimiters, len + 2);
+    if(!new_del) {
+        return -1;
+    }
+    opts->delimiters = new_del;
+    opts->delimiters[len] = c;
+    opts->delimiters[len + 1] = '\0';
+    return 0;
+}
+
+// Замена разделителей (для -D)
+static int set_delimiters(Options *opts, char c) {
+    char *new_del = malloc(2);
+    if(!new_del) {
+        return -1;
+    }
+    free(opts->delimiters);
+    opts->delimiters = new_del;
+    opts->delimiters[0] = c;
+    opts->delimiters[1] = '\0';
+    return 0;
+}
+
+// Проверка, является ли строка целым неотрицательным числом
+static bool is_positive_integer(const char *s) {
+    if(!s || *s == '\0') return false;
+    while(*s) {
+        if(*s < '0' || *s > '9') return false;
+        s++;
+    }
+    return true;
+}
+
+// Извлекает значение для опции. Возвращает указатель на значение и сдвигает индекс.
+// Если ошибка – возвращает NULL и устанавливает *next_i = i.
+static const char *extract_value(Options *opts, int argc, char **argv, int i, int *next_i) {
+    const char *arg = argv[i];
+    if(arg[0] != '-') {
+        *next_i = i;
+        return NULL;
+    }
+    const char *opt = arg + 1; // имя опции без '-'
+
+    // Ищем разделитель в arg
+    char *delim_pos = NULL;
+    for(const char *d = opts->delimiters; *d; ++d) {
+        char *pos = strchr(arg, *d);
+        if(pos && (!delim_pos || pos < delim_pos)) {
+            delim_pos = pos;
+        }
+    }
+    if(delim_pos) {
+        // Есть разделитель, значение после него
+        *next_i = i;
+        return delim_pos + 1;
+    } else {
+        // Нет разделителя, проверяем следующий аргумент
+        if(i + 1 < argc) {
+            const char *next = argv[i + 1];
+            if(next[0] != '-') {
+                // Следующий аргумент не начинается с '-' – считаем его значением
+                *next_i = i + 1;
+                return next;
+            }
+        }
+        // Значения нет
+        *next_i = i;
+        return NULL;
+    }
 }
