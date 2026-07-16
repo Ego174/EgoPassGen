@@ -1,0 +1,3 @@
+LIBRARY app_lib
+EXPORTS
+    LibAddFunction
