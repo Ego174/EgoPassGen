@@ -47,6 +47,8 @@ static bool is_positive_integer(const char *s) {
 
 // Извлекает имя опции и возможное значение из аргумента.
 // Возвращает указатель на начало имени (внутри arg) или NULL.
+// *out_value: если есть значение в этом же аргументе – указатель на него, иначе NULL.
+// *name_len: длина имени опции.
 static const char *extract_option_name_and_value(const Options *opts, const char *arg,
                                                  const char **out_value, int *name_len) {
     if(arg[0] != '-') return NULL;
@@ -99,46 +101,53 @@ int parse_options(int argc, char **argv, Options *opts) {
             }
         }
 
-        // --- Обработка -d и -D (требуют отдельный символ, не прилепленный) ---
+        // --- Обработка -d (добавление разделителя) ---
         if(strcmp(opt_name, "d") == 0) {
-            if(value) {
-                fprintf(stderr, "Error: Option -d requires a separate character argument\n");
-                return -1;
+            const char *delim_char = NULL;
+            int delta = 0;
+            if(value && strlen(value) == 1) {
+                delim_char = value;
+                delta = 1; // съели текущий аргумент
+            } else if(!value && i + 1 < argc && argv[i + 1][0] != '-') {
+                if(strlen(argv[i + 1]) == 1) {
+                    delim_char = argv[i + 1];
+                    delta = 2; // съели текущий и следующий
+                }
             }
-            if(i + 1 >= argc || argv[i + 1][0] == '-') {
+            if(!delim_char) {
                 fprintf(stderr, "Error: Option -d requires a character argument\n");
                 return -1;
             }
-            if(strlen(argv[i + 1]) != 1) {
-                fprintf(stderr, "Error: Option -d expects exactly one character\n");
-                return -1;
-            }
-            if(add_delimiter(opts, argv[i + 1][0]) != 0) {
+            if(add_delimiter(opts, delim_char[0]) != 0) {
                 fprintf(stderr, "Error: Memory allocation for delimiter\n");
                 return -1;
             }
-            i += 2;
+            i += delta;
             continue;
         }
 
+        // --- Обработка -D (замена разделителей) ---
         if(strcmp(opt_name, "D") == 0) {
-            if(value) {
-                fprintf(stderr, "Error: Option -D requires a separate character argument\n");
-                return -1;
+            const char *delim_char = NULL;
+            int delta = 0;
+            if(value && strlen(value) == 1) {
+                delim_char = value;
+                delta = 1;
+            } else if(!value && i + 1 < argc && argv[i + 1][0] != '-') {
+                if(strlen(argv[i + 1]) == 1) {
+                    delim_char = argv[i + 1];
+                    delta = 2;
+                }
             }
-            if(i + 1 >= argc || argv[i + 1][0] == '-') {
+            if(!delim_char) {
                 fprintf(stderr, "Error: Option -D requires a character argument\n");
                 return -1;
             }
-            if(strlen(argv[i + 1]) != 1) {
-                fprintf(stderr, "Error: Option -D expects exactly one character\n");
-                return -1;
-            }
-            if(set_delimiters(opts, argv[i + 1][0]) != 0) {
+            if(set_delimiters(opts, delim_char[0]) != 0) {
                 fprintf(stderr, "Error: Memory allocation for delimiter\n");
                 return -1;
             }
-            i += 2;
+            i += delta;
             continue;
         }
 
