@@ -57,8 +57,8 @@ static const char *extract_value(Options *opts, int argc, char **argv, int i, in
         *next_i = i;
         return NULL;
     }
-    const char *opt = arg + 1; // не используется, но оставляем
 
+    // Ищем разделитель
     char *delim_pos = NULL;
     for(const char *d = opts->delimiters; *d; ++d) {
         char *pos = strchr(arg, *d);
@@ -69,17 +69,28 @@ static const char *extract_value(Options *opts, int argc, char **argv, int i, in
     if(delim_pos) {
         *next_i = i;
         return delim_pos + 1;
-    } else {
-        if(i + 1 < argc) {
-            const char *next = argv[i + 1];
-            if(next[0] != '-') {
-                *next_i = i + 1;
-                return next;
-            }
-        }
-        *next_i = i;
-        return NULL;
     }
+
+    // Разделителя нет, пробуем выделить имя опции (буквенная часть)
+    const char *opt_part = arg + 1;
+    int len = 0;
+    while(opt_part[len] && isalpha(opt_part[len])) len++;
+    // Если после буквенной части есть символы, то это значение
+    if(opt_part[len] != '\0') {
+        *next_i = i;
+        return opt_part + len;
+    }
+
+    // Иначе смотрим следующий аргумент
+    if(i + 1 < argc) {
+        const char *next = argv[i + 1];
+        if(next[0] != '-') {
+            *next_i = i + 1;
+            return next;
+        }
+    }
+    *next_i = i;
+    return NULL;
 }
 
 // Основная функция парсинга
