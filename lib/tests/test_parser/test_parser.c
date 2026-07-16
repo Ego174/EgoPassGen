@@ -18,7 +18,7 @@ void test_parse_minl_maxl(void) {
     Options opts;
     options_init(&opts);
     char *argv[] = {"prog", "-minl", "10", "-maxl", "20"};
-    int ret = parse_options(4, argv, &opts);
+    int ret = parse_options(5, argv, &opts);          // argc = 5
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_TRUE(opts.has_minl);
     TEST_ASSERT_TRUE(opts.has_maxl);
@@ -44,7 +44,7 @@ void test_parse_n_incompatible_with_minmax(void) {
     Options opts;
     options_init(&opts);
     char *argv[] = {"prog", "-n", "10", "-minl", "5", "-maxl", "15"};
-    int ret = parse_options(6, argv, &opts);
+    int ret = parse_options(7, argv, &opts);
     TEST_ASSERT_EQUAL_INT(-1, ret);
     options_free(&opts);
 }
@@ -124,30 +124,34 @@ void test_parse_too_many_probs(void) {
     options_free(&opts);
 }
 
-// 10. Корректный -d добавление разделителя и использование его
+// 10. Корректный -d добавление разделителя и использование его (с парой -minl/-maxl)
 void test_parse_delimiter_add_and_use(void) {
     Options opts;
     options_init(&opts);
-    char *argv[] = {"prog", "-d", "!", "-minl!10"};
-    int ret = parse_options(4, argv, &opts);
+    // используем разделитель '!' для -minl и -maxl
+    char *argv[] = {"prog", "-d", "!", "-minl!10", "-maxl!20"};
+    int ret = parse_options(5, argv, &opts);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_TRUE(strchr(opts.delimiters, '!') != NULL);
     TEST_ASSERT_TRUE(opts.has_minl);
+    TEST_ASSERT_TRUE(opts.has_maxl);
     TEST_ASSERT_EQUAL_INT(10, opts.min_len);
+    TEST_ASSERT_EQUAL_INT(20, opts.max_len);
     options_free(&opts);
 }
 
-// 11. Корректный -D замена разделителей и использование
+// 11. Корректный -D замена разделителей и использование (с парой -minl/-maxl)
 void test_parse_delimiter_replace_and_use(void) {
     Options opts;
     options_init(&opts);
-    char *argv[] = {"prog", "-D", "#", "-minl#10"};
-    int ret = parse_options(4, argv, &opts);
+    char *argv[] = {"prog", "-D", "#", "-minl#10", "-maxl#20"};
+    int ret = parse_options(5, argv, &opts);
     TEST_ASSERT_EQUAL_INT(0, ret);
-    // Разделители должны быть только "#"
     TEST_ASSERT_EQUAL_STRING("#", opts.delimiters);
     TEST_ASSERT_TRUE(opts.has_minl);
+    TEST_ASSERT_TRUE(opts.has_maxl);
     TEST_ASSERT_EQUAL_INT(10, opts.min_len);
+    TEST_ASSERT_EQUAL_INT(20, opts.max_len);
     options_free(&opts);
 }
 
@@ -195,13 +199,13 @@ void test_maxl_without_minl(void) {
     options_free(&opts);
 }
 
-// 16. Корректный -C с повторяющимися символами (должно быть ошибкой по условию? В условии сказано "один или несколько символов из множества", повторы не запрещены явно, но можно игнорировать повторы. Однако в примере ошибки -C aDa указан как ошибка, значит повторы не допускаются. Проверим.
+// 16. -C с повторами (должно быть ошибкой)
 void test_C_with_duplicates(void) {
     Options opts;
     options_init(&opts);
     char *argv[] = {"prog", "-C", "aDa"};
     int ret = parse_options(3, argv, &opts);
-    TEST_ASSERT_EQUAL_INT(-1, ret); // должно быть ошибкой (повтор a)
+    TEST_ASSERT_EQUAL_INT(-1, ret);
     options_free(&opts);
 }
 

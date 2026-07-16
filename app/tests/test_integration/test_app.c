@@ -14,7 +14,7 @@ void tearDown(void) {}
 // 1. Корректный вызов с -minl и -maxl
 void test_app_valid_minl_maxl(void) {
     char *argv[] = {"prog", "-minl", "5", "-maxl", "10"};
-    int ret = generate_passwords_from_args(4, argv);
+    int ret = generate_passwords_from_args(5, argv);   // argc = 5
     TEST_ASSERT_EQUAL_INT(0, ret);
 }
 
