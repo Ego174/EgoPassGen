@@ -45,7 +45,6 @@ static bool is_positive_integer(const char *s) {
     return true;
 }
 
-// Извлекает имя опции и возможное значение из аргумента.
 static const char *extract_option_name_and_value(const Options *opts, const char *arg,
                                                  const char **out_value, int *name_len) {
     if(arg[0] != '-') return NULL;
@@ -96,7 +95,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             }
         }
 
-        // --- Обработка -d (добавление разделителя) ---
+        // -d
         if(strcmp(opt_name, "d") == 0) {
             const char *delim_char = NULL;
             int delta = 0;
@@ -121,7 +120,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- Обработка -D (замена разделителей) ---
+        // -D
         if(strcmp(opt_name, "D") == 0) {
             const char *delim_char = NULL;
             int delta = 0;
@@ -146,7 +145,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- Определяем, известна ли опция и требует ли аргумент ---
         bool known = false;
         bool requires_arg = false;
 
@@ -173,7 +171,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             return -1;
         }
 
-        // --- Обработка -minl ---
         if(strcmp(opt_name, "minl") == 0) {
             if(opts->has_minl) {
                 fprintf(stderr, "Error: Option -minl repeated\n");
@@ -193,7 +190,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- -maxl ---
         if(strcmp(opt_name, "maxl") == 0) {
             if(opts->has_maxl) {
                 fprintf(stderr, "Error: Option -maxl repeated\n");
@@ -213,7 +209,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- -n ---
         if(strcmp(opt_name, "n") == 0) {
             if(opts->has_fixed_len) {
                 fprintf(stderr, "Error: Option -n repeated\n");
@@ -233,7 +228,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- -c ---
         if(strcmp(opt_name, "c") == 0) {
             if(opts->has_count) {
                 fprintf(stderr, "Error: Option -c repeated\n");
@@ -253,7 +247,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- -a ---
         if(strcmp(opt_name, "a") == 0) {
             if(opts->has_alphabet) {
                 fprintf(stderr, "Error: Option -a repeated\n");
@@ -276,7 +269,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- -C ---
+        // -C с проверкой на дубликаты
         if(strcmp(opt_name, "C") == 0) {
             if(opts->has_categories) {
                 fprintf(stderr, "Error: Option -C repeated\n");
@@ -286,24 +279,22 @@ int parse_options(int argc, char **argv, Options *opts) {
                 fprintf(stderr, "Error: Option -C requires an argument (aADS)\n");
                 return -1;
             }
-            bool seen[4] = {false, false, false, false}; // a, A, D, S
             const char *p = value;
             while(*p) {
-                int idx = -1;
-                if(*p == 'a') idx = 0;
-                else if(*p == 'A') idx = 1;
-                else if(*p == 'D') idx = 2;
-                else if(*p == 'S') idx = 3;
-                else {
+                if(*p != 'a' && *p != 'A' && *p != 'D' && *p != 'S') {
                     fprintf(stderr, "Error: Option -C expects only characters a, A, D, S\n");
                     return -1;
                 }
-                if(seen[idx]) {
-                    fprintf(stderr, "Error: Duplicate character in -C argument\n");
-                    return -1;
-                }
-                seen[idx] = true;
                 p++;
+            }
+            // Проверка дубликатов
+            for(const char *p1 = value; *p1; ++p1) {
+                for(const char *p2 = p1 + 1; *p2; ++p2) {
+                    if(*p1 == *p2) {
+                        fprintf(stderr, "Error: Duplicate character in -C argument\n");
+                        return -1;
+                    }
+                }
             }
             if(strlen(value) > 4) {
                 fprintf(stderr, "Error: Option -C can have at most 4 characters\n");
@@ -316,7 +307,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- -P (вероятности) ---
         if(strcmp(opt_name, "P") == 0) {
             if(opts->has_probs) {
                 fprintf(stderr, "Error: Option -P repeated\n");
@@ -326,7 +316,6 @@ int parse_options(int argc, char **argv, Options *opts) {
                 fprintf(stderr, "Error: Option -P requires a list of probabilities\n");
                 return -1;
             }
-            // Подсчёт чисел
             const char *s = value;
             int count = 0;
             int in_num = 0;
@@ -390,11 +379,10 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // Неизвестная опция – игнорируем
         i++;
     }
 
-    // --- Пост-разбор ---
+    // Пост-разбор
     if(opts->has_minl && !opts->has_maxl) {
         fprintf(stderr, "Error: -minl requires -maxl\n");
         return -1;
@@ -412,7 +400,6 @@ int parse_options(int argc, char **argv, Options *opts) {
         return -1;
     }
 
-    // Установка алфавита по умолчанию, если не задан
     if(!opts->has_alphabet && !opts->has_categories) {
         char default_alphabet[95];
         int idx = 0;
@@ -429,7 +416,6 @@ int parse_options(int argc, char **argv, Options *opts) {
         opts->has_alphabet = true;
     }
 
-    // Если -a была без аргумента – ставим алфавит по умолчанию
     if(opts->has_alphabet && opts->alphabet_str == NULL && opts->alphabet_type == ALPHABET_TYPE_STRING) {
         char default_alphabet[95];
         int idx = 0;
