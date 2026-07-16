@@ -10,6 +10,7 @@ parser.c - Реализация разбора аргументов команд
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 static bool is_delimiter(const Options *opts, char c) {
     return strchr(opts->delimiters, c) != NULL;
@@ -90,7 +91,7 @@ int parse_options(int argc, char **argv, Options *opts) {
         opt_name[name_len] = '\0';
 
         // Если значение не было в текущем аргументе, попробуем взять следующий аргумент (если он не опция)
-        int next_delta = 0; // сколько дополнительных аргументов съедаем (0 или 1)
+        int next_delta = 0;
         if(!value) {
             if(i + 1 < argc && argv[i + 1][0] != '-') {
                 value = argv[i + 1];
@@ -141,14 +142,36 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // --- Обработка остальных опций ---
-        // Если опция требует аргумент, а его нет – ошибка (кроме -a, которое может быть без аргумента)
-        if(!value && strcmp(opt_name, "a") != 0) {
+        // --- Определяем, известна ли опция и требует ли аргумент ---
+        bool known = false;
+        bool requires_arg = false;
+
+        if(strcmp(opt_name, "minl") == 0 ||
+           strcmp(opt_name, "maxl") == 0 ||
+           strcmp(opt_name, "n") == 0 ||
+           strcmp(opt_name, "c") == 0 ||
+           strcmp(opt_name, "C") == 0 ||
+           strcmp(opt_name, "P") == 0) {
+            known = true;
+            requires_arg = true;
+        } else if(strcmp(opt_name, "a") == 0) {
+            known = true;
+            requires_arg = false; // может быть без аргумента
+        }
+
+        // Неизвестная опция – игнорируем
+        if(!known) {
+            i++;
+            continue;
+        }
+
+        // Если опция требует аргумент, но его нет – ошибка
+        if(requires_arg && !value) {
             fprintf(stderr, "Error: Option -%s requires an argument\n", opt_name);
             return -1;
         }
 
-        // -minl
+        // --- Обработка известных опций (кроме -d и -D) ---
         if(strcmp(opt_name, "minl") == 0) {
             if(opts->has_minl) {
                 fprintf(stderr, "Error: Option -minl repeated\n");
@@ -168,7 +191,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // -maxl
         if(strcmp(opt_name, "maxl") == 0) {
             if(opts->has_maxl) {
                 fprintf(stderr, "Error: Option -maxl repeated\n");
@@ -188,7 +210,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // -n
         if(strcmp(opt_name, "n") == 0) {
             if(opts->has_fixed_len) {
                 fprintf(stderr, "Error: Option -n repeated\n");
@@ -208,7 +229,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // -c
         if(strcmp(opt_name, "c") == 0) {
             if(opts->has_count) {
                 fprintf(stderr, "Error: Option -c repeated\n");
@@ -228,7 +248,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // -a
         if(strcmp(opt_name, "a") == 0) {
             if(opts->has_alphabet) {
                 fprintf(stderr, "Error: Option -a repeated\n");
@@ -251,7 +270,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // -C
         if(strcmp(opt_name, "C") == 0) {
             if(opts->has_categories) {
                 fprintf(stderr, "Error: Option -C repeated\n");
@@ -280,7 +298,6 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // -P (вероятности)
         if(strcmp(opt_name, "P") == 0) {
             if(opts->has_probs) {
                 fprintf(stderr, "Error: Option -P repeated\n");
@@ -354,7 +371,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // Неизвестная опция – игнорируем
+        // Если сюда дошли – что-то пошло не так, но игнорируем
         i++;
     }
 
