@@ -9,10 +9,7 @@ parser.c - Реализация разбора аргументов команд
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 #include <ctype.h>
-
-// Вспомогательные функции (статик)
 
 static bool is_delimiter(const Options *opts, char c) {
     return strchr(opts->delimiters, c) != NULL;
@@ -21,9 +18,7 @@ static bool is_delimiter(const Options *opts, char c) {
 static int add_delimiter(Options *opts, char c) {
     size_t len = strlen(opts->delimiters);
     char *new_del = realloc(opts->delimiters, len + 2);
-    if(!new_del) {
-        return -1;
-    }
+    if(!new_del) return -1;
     opts->delimiters = new_del;
     opts->delimiters[len] = c;
     opts->delimiters[len + 1] = '\0';
@@ -32,9 +27,7 @@ static int add_delimiter(Options *opts, char c) {
 
 static int set_delimiters(Options *opts, char c) {
     char *new_del = malloc(2);
-    if(!new_del) {
-        return -1;
-    }
+    if(!new_del) return -1;
     free(opts->delimiters);
     opts->delimiters = new_del;
     opts->delimiters[0] = c;
@@ -45,55 +38,35 @@ static int set_delimiters(Options *opts, char c) {
 static bool is_positive_integer(const char *s) {
     if(!s || *s == '\0') return false;
     while(*s) {
-        if(*s < '0' || *s > '9') return false;
+        if(!isdigit(*s)) return false;
         s++;
     }
     return true;
 }
 
-static const char *extract_value(Options *opts, int argc, char **argv, int i, int *next_i) {
-    const char *arg = argv[i];
-    if(arg[0] != '-') {
-        *next_i = i;
-        return NULL;
-    }
-
-    // Ищем разделитель
-    char *delim_pos = NULL;
-    for(const char *d = opts->delimiters; *d; ++d) {
-        char *pos = strchr(arg, *d);
-        if(pos && (!delim_pos || pos < delim_pos)) {
-            delim_pos = pos;
-        }
-    }
-    if(delim_pos) {
-        *next_i = i;
-        return delim_pos + 1;
-    }
-
-    // Разделителя нет, пробуем выделить имя опции (буквенная часть)
-    const char *opt_part = arg + 1;
+// Извлекает имя опции и возможное значение из аргумента.
+// Возвращает указатель на начало имени (внутри arg) или NULL.
+static const char *extract_option_name_and_value(const Options *opts, const char *arg,
+                                                 const char **out_value, int *name_len) {
+    if(arg[0] != '-') return NULL;
+    const char *p = arg + 1;
     int len = 0;
-    while(opt_part[len] && isalpha(opt_part[len])) len++;
-    // Если после буквенной части есть символы, то это значение
-    if(opt_part[len] != '\0') {
-        *next_i = i;
-        return opt_part + len;
-    }
-
-    // Иначе смотрим следующий аргумент
-    if(i + 1 < argc) {
-        const char *next = argv[i + 1];
-        if(next[0] != '-') {
-            *next_i = i + 1;
-            return next;
+    while(p[len] && isalpha(p[len])) len++;
+    if(len == 0) return NULL;
+    *name_len = len;
+    if(p[len] != '\0') {
+        const char *val_start = p + len;
+        // Если первый символ после имени – разделитель, пропускаем его
+        if(is_delimiter(opts, val_start[0])) {
+            val_start++;
         }
+        *out_value = val_start;
+    } else {
+        *out_value = NULL;
     }
-    *next_i = i;
-    return NULL;
+    return p;
 }
 
-// Основная функция парсинга
 int parse_options(int argc, char **argv, Options *opts) {
     int i = 1;
     while(i < argc) {
@@ -102,65 +75,83 @@ int parse_options(int argc, char **argv, Options *opts) {
             i++;
             continue;
         }
-        const char *opt_name = arg + 1;
 
-        // -d
+        int name_len;
+        const char *value;
+        const char *opt_start = extract_option_name_and_value(opts, arg, &value, &name_len);
+        if(!opt_start) {
+            i++;
+            continue;
+        }
+
+        char opt_name[64];
+        if(name_len >= (int)sizeof(opt_name)) name_len = (int)sizeof(opt_name) - 1;
+        strncpy(opt_name, opt_start, name_len);
+        opt_name[name_len] = '\0';
+
+        // Если значение не было в текущем аргументе, попробуем взять следующий аргумент (если он не опция)
+        int next_delta = 0; // сколько дополнительных аргументов съедаем (0 или 1)
+        if(!value) {
+            if(i + 1 < argc && argv[i + 1][0] != '-') {
+                value = argv[i + 1];
+                next_delta = 1;
+            }
+        }
+
+        // --- Обработка -d и -D (требуют отдельный символ, не прилепленный) ---
         if(strcmp(opt_name, "d") == 0) {
-            if(i + 1 >= argc) {
+            if(value) {
+                fprintf(stderr, "Error: Option -d requires a separate character argument\n");
+                return -1;
+            }
+            if(i + 1 >= argc || argv[i + 1][0] == '-') {
                 fprintf(stderr, "Error: Option -d requires a character argument\n");
                 return -1;
             }
-            const char *sym = argv[i + 1];
-            if(sym[0] == '-') {
-                fprintf(stderr, "Error: Option -d requires a character, not an option\n");
-                return -1;
-            }
-            if(strlen(sym) != 1) {
+            if(strlen(argv[i + 1]) != 1) {
                 fprintf(stderr, "Error: Option -d expects exactly one character\n");
                 return -1;
             }
-            if(add_delimiter(opts, sym[0]) != 0) {
-                fprintf(stderr, "Error: Memory allocation failed for delimiter\n");
+            if(add_delimiter(opts, argv[i + 1][0]) != 0) {
+                fprintf(stderr, "Error: Memory allocation for delimiter\n");
                 return -1;
             }
             i += 2;
             continue;
         }
 
-        // -D
         if(strcmp(opt_name, "D") == 0) {
-            if(i + 1 >= argc) {
+            if(value) {
+                fprintf(stderr, "Error: Option -D requires a separate character argument\n");
+                return -1;
+            }
+            if(i + 1 >= argc || argv[i + 1][0] == '-') {
                 fprintf(stderr, "Error: Option -D requires a character argument\n");
                 return -1;
             }
-            const char *sym = argv[i + 1];
-            if(sym[0] == '-') {
-                fprintf(stderr, "Error: Option -D requires a character, not an option\n");
-                return -1;
-            }
-            if(strlen(sym) != 1) {
+            if(strlen(argv[i + 1]) != 1) {
                 fprintf(stderr, "Error: Option -D expects exactly one character\n");
                 return -1;
             }
-            if(set_delimiters(opts, sym[0]) != 0) {
-                fprintf(stderr, "Error: Memory allocation failed for delimiter\n");
+            if(set_delimiters(opts, argv[i + 1][0]) != 0) {
+                fprintf(stderr, "Error: Memory allocation for delimiter\n");
                 return -1;
             }
             i += 2;
             continue;
         }
 
-        int next_i;
-        const char *value = extract_value(opts, argc, argv, i, &next_i);
+        // --- Обработка остальных опций ---
+        // Если опция требует аргумент, а его нет – ошибка (кроме -a, которое может быть без аргумента)
+        if(!value && strcmp(opt_name, "a") != 0) {
+            fprintf(stderr, "Error: Option -%s requires an argument\n", opt_name);
+            return -1;
+        }
 
         // -minl
         if(strcmp(opt_name, "minl") == 0) {
             if(opts->has_minl) {
                 fprintf(stderr, "Error: Option -minl repeated\n");
-                return -1;
-            }
-            if(!value) {
-                fprintf(stderr, "Error: Option -minl requires a numeric argument\n");
                 return -1;
             }
             if(!is_positive_integer(value)) {
@@ -173,7 +164,7 @@ int parse_options(int argc, char **argv, Options *opts) {
                 return -1;
             }
             opts->has_minl = true;
-            i = next_i + 1;
+            i += 1 + next_delta;
             continue;
         }
 
@@ -181,10 +172,6 @@ int parse_options(int argc, char **argv, Options *opts) {
         if(strcmp(opt_name, "maxl") == 0) {
             if(opts->has_maxl) {
                 fprintf(stderr, "Error: Option -maxl repeated\n");
-                return -1;
-            }
-            if(!value) {
-                fprintf(stderr, "Error: Option -maxl requires a numeric argument\n");
                 return -1;
             }
             if(!is_positive_integer(value)) {
@@ -197,7 +184,7 @@ int parse_options(int argc, char **argv, Options *opts) {
                 return -1;
             }
             opts->has_maxl = true;
-            i = next_i + 1;
+            i += 1 + next_delta;
             continue;
         }
 
@@ -205,10 +192,6 @@ int parse_options(int argc, char **argv, Options *opts) {
         if(strcmp(opt_name, "n") == 0) {
             if(opts->has_fixed_len) {
                 fprintf(stderr, "Error: Option -n repeated\n");
-                return -1;
-            }
-            if(!value) {
-                fprintf(stderr, "Error: Option -n requires a numeric argument\n");
                 return -1;
             }
             if(!is_positive_integer(value)) {
@@ -221,7 +204,7 @@ int parse_options(int argc, char **argv, Options *opts) {
                 return -1;
             }
             opts->has_fixed_len = true;
-            i = next_i + 1;
+            i += 1 + next_delta;
             continue;
         }
 
@@ -229,10 +212,6 @@ int parse_options(int argc, char **argv, Options *opts) {
         if(strcmp(opt_name, "c") == 0) {
             if(opts->has_count) {
                 fprintf(stderr, "Error: Option -c repeated\n");
-                return -1;
-            }
-            if(!value) {
-                fprintf(stderr, "Error: Option -c requires a numeric argument\n");
                 return -1;
             }
             if(!is_positive_integer(value)) {
@@ -245,7 +224,7 @@ int parse_options(int argc, char **argv, Options *opts) {
                 return -1;
             }
             opts->has_count = true;
-            i = next_i + 1;
+            i += 1 + next_delta;
             continue;
         }
 
@@ -263,11 +242,11 @@ int parse_options(int argc, char **argv, Options *opts) {
                     fprintf(stderr, "Error: Memory allocation for alphabet\n");
                     return -1;
                 }
-                i = next_i + 1;
+                i += 1 + next_delta;
             } else {
                 opts->alphabet_type = ALPHABET_TYPE_STRING;
                 opts->alphabet_str = NULL;
-                i = next_i + 1;
+                i += 1 + next_delta;
             }
             continue;
         }
@@ -297,11 +276,11 @@ int parse_options(int argc, char **argv, Options *opts) {
             opts->alphabet_type = ALPHABET_TYPE_CATEGORIES;
             strcpy(opts->categories, value);
             opts->has_categories = true;
-            i = next_i + 1;
+            i += 1 + next_delta;
             continue;
         }
 
-        // -P
+        // -P (вероятности)
         if(strcmp(opt_name, "P") == 0) {
             if(opts->has_probs) {
                 fprintf(stderr, "Error: Option -P repeated\n");
@@ -311,20 +290,20 @@ int parse_options(int argc, char **argv, Options *opts) {
                 fprintf(stderr, "Error: Option -P requires a list of probabilities\n");
                 return -1;
             }
+            // Подсчёт чисел
             const char *s = value;
             int count = 0;
-            const char *t = s;
             int in_num = 0;
-            while(*t) {
-                if(*t == ',') {
+            while(*s) {
+                if(*s == ',') {
                     if(in_num) { count++; in_num = 0; }
-                } else if((*t >= '0' && *t <= '9') || *t == '.' || *t == '-') {
+                } else if(*s >= '0' && *s <= '9' || *s == '.' || *s == '-') {
                     in_num = 1;
                 } else {
                     fprintf(stderr, "Error: Invalid character in probability list\n");
                     return -1;
                 }
-                t++;
+                s++;
             }
             if(in_num) count++;
             if(count == 0) {
@@ -340,7 +319,8 @@ int parse_options(int argc, char **argv, Options *opts) {
             opts->probs_count = count;
 
             int idx = 0;
-            const char *start = s;
+            const char *start = value;
+            s = value;
             while(*s) {
                 if(*s == ',') {
                     if(s > start) {
@@ -370,7 +350,7 @@ int parse_options(int argc, char **argv, Options *opts) {
                 opts->probs[idx++] = val;
             }
             opts->has_probs = true;
-            i = next_i + 1;
+            i += 1 + next_delta;
             continue;
         }
 
@@ -378,7 +358,7 @@ int parse_options(int argc, char **argv, Options *opts) {
         i++;
     }
 
-    // Проверки совместимости
+    // --- Пост-разбор ---
     if(opts->has_minl && !opts->has_maxl) {
         fprintf(stderr, "Error: -minl requires -maxl\n");
         return -1;
@@ -413,7 +393,7 @@ int parse_options(int argc, char **argv, Options *opts) {
         opts->has_alphabet = true;
     }
 
-    // Если -a без аргумента – ставим умолчание
+    // Если -a была без аргумента – ставим алфавит по умолчанию
     if(opts->has_alphabet && opts->alphabet_str == NULL && opts->alphabet_type == ALPHABET_TYPE_STRING) {
         char default_alphabet[95];
         int idx = 0;
@@ -446,12 +426,7 @@ int parse_options(int argc, char **argv, Options *opts) {
     }
 
     if(opts->has_probs) {
-        int expected = 0;
-        if(opts->alphabet_type == ALPHABET_TYPE_STRING) {
-            expected = strlen(opts->alphabet_str);
-        } else {
-            expected = strlen(opts->categories);
-        }
+        int expected = (opts->alphabet_type == ALPHABET_TYPE_STRING) ? strlen(opts->alphabet_str) : strlen(opts->categories);
         if(opts->probs_count > expected) {
             fprintf(stderr, "Error: Too many probabilities, expected at most %d\n", expected);
             return -1;
