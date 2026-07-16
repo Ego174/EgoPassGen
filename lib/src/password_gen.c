@@ -1,0 +1,206 @@
+/*
+password_gen.c - Реализация основной функции генерации паролей
+
+Хаиров Егор Вадимович
+МК-101
+*/
+
+#include "password_gen.h"
+#include "options.h"
+#include "parser.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <math.h>
+
+static void normalize_probs(double *probs, int count) {
+    double sum = 0.0;
+    for(int i = 0; i < count; ++i) sum += probs[i];
+    if(sum == 0.0) {
+        for(int i = 0; i < count; ++i) probs[i] = 1.0 / count;
+    } else {
+        for(int i = 0; i < count; ++i) probs[i] /= sum;
+    }
+}
+
+static void generate_one_password(const Options *opts) {
+    // Определяем алфавит и вероятности
+    int alphabet_size;
+    char *alphabet = NULL;
+    double *probs = NULL;
+
+    if(opts->alphabet_type == ALPHABET_TYPE_STRING) {
+        alphabet = opts->alphabet_str;
+        alphabet_size = strlen(alphabet);
+        probs = malloc(alphabet_size * sizeof(double));
+        if(!probs) {
+            fprintf(stderr, "Memory error\n");
+            return;
+        }
+        if(opts->has_probs) {
+            int i;
+            for(i = 0; i < opts->probs_count && i < alphabet_size; ++i) {
+                probs[i] = opts->probs[i];
+            }
+            if(i < alphabet_size) {
+                double remaining = 1.0;
+                for(int j = 0; j < i; ++j) remaining -= probs[j];
+                if(remaining < 0) {
+                    // Если сумма >1, нормализуем все
+                    for(int j = 0; j < alphabet_size; ++j) probs[j] = 0.0;
+                    for(int j = 0; j < i; ++j) probs[j] = opts->probs[j];
+                    normalize_probs(probs, alphabet_size);
+                } else {
+                    double each = remaining / (alphabet_size - i);
+                    for(int j = i; j < alphabet_size; ++j) probs[j] = each;
+                }
+            } else {
+                // ровно столько же вероятностей
+                // нормализуем на всякий случай
+                normalize_probs(probs, alphabet_size);
+            }
+        } else {
+            for(int i = 0; i < alphabet_size; ++i) probs[i] = 1.0 / alphabet_size;
+        }
+    }
+    else { // CATEGORIES
+        char full_alphabet[256];
+        int full_size = 0;
+        for(const char *cat = opts->categories; *cat; ++cat) {
+            switch(*cat) {
+                case 'a':
+                    for(char c = 'a'; c <= 'z'; ++c) full_alphabet[full_size++] = c;
+                    break;
+                case 'A':
+                    for(char c = 'A'; c <= 'Z'; ++c) full_alphabet[full_size++] = c;
+                    break;
+                case 'D':
+                    for(char c = '0'; c <= '9'; ++c) full_alphabet[full_size++] = c;
+                    break;
+                case 'S': {
+                    const char *specials = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+                    for(const char *s = specials; *s; ++s) full_alphabet[full_size++] = *s;
+                    break;
+                }
+            }
+        }
+        full_alphabet[full_size] = '\0';
+        alphabet = strdup(full_alphabet);
+        alphabet_size = full_size;
+        probs = malloc(alphabet_size * sizeof(double));
+        if(!alphabet || !probs) {
+            fprintf(stderr, "Memory error\n");
+            free(probs);
+            free(alphabet);
+            return;
+        }
+
+        int cat_count = strlen(opts->categories);
+        double cat_probs[4];
+        for(int i = 0; i < cat_count; ++i) cat_probs[i] = 0.0;
+        if(opts->has_probs) {
+            for(int i = 0; i < opts->probs_count && i < cat_count; ++i) {
+                cat_probs[i] = opts->probs[i];
+            }
+            if(opts->probs_count < cat_count) {
+                double remaining = 1.0;
+                for(int i = 0; i < opts->probs_count; ++i) remaining -= cat_probs[i];
+                if(remaining < 0) {
+                    normalize_probs(cat_probs, cat_count);
+                } else {
+                    double each = remaining / (cat_count - opts->probs_count);
+                    for(int i = opts->probs_count; i < cat_count; ++i) cat_probs[i] = each;
+                }
+            } else {
+                normalize_probs(cat_probs, cat_count);
+            }
+        } else {
+            for(int i = 0; i < cat_count; ++i) cat_probs[i] = 1.0 / cat_count;
+        }
+
+        int idx = 0;
+        for(const char *cat = opts->categories; *cat; ++cat) {
+            int cat_size;
+            switch(*cat) {
+                case 'a': cat_size = 26; break;
+                case 'A': cat_size = 26; break;
+                case 'D': cat_size = 10; break;
+                case 'S': cat_size = 32; break;
+                default: cat_size = 0;
+            }
+            double prob_per_char = cat_probs[cat - opts->categories] / cat_size;
+            for(int i = 0; i < cat_size; ++i) {
+                probs[idx++] = prob_per_char;
+            }
+        }
+        normalize_probs(probs, alphabet_size);
+    }
+
+    // Определяем длину пароля
+    int length;
+    if(opts->has_fixed_len) {
+        length = opts->fixed_len;
+    } else {
+        int min = opts->has_minl ? opts->min_len : 1;
+        int max = opts->has_maxl ? opts->max_len : 20;
+        if(!opts->has_minl && !opts->has_maxl) {
+            length = 8;
+        } else {
+            length = min + rand() % (max - min + 1);
+        }
+    }
+
+    char *password = malloc(length + 1);
+    if(!password) {
+        fprintf(stderr, "Memory error\n");
+        free(probs);
+        if(opts->alphabet_type == ALPHABET_TYPE_CATEGORIES) free(alphabet);
+        return;
+    }
+    for(int i = 0; i < length; ++i) {
+        double r = (double)rand() / RAND_MAX;
+        double cum = 0.0;
+        int chosen = 0;
+        for(int j = 0; j < alphabet_size; ++j) {
+            cum += probs[j];
+            if(r <= cum) {
+                chosen = j;
+                break;
+            }
+        }
+        password[i] = alphabet[chosen];
+    }
+    password[length] = '\0';
+    printf("%s\n", password);
+
+    free(password);
+    free(probs);
+    if(opts->alphabet_type == ALPHABET_TYPE_CATEGORIES) free(alphabet);
+}
+
+static void generate_passwords(const Options *opts) {
+    srand((unsigned int)time(NULL));
+    for(int i = 0; i < opts->count; ++i) {
+        generate_one_password(opts);
+    }
+}
+
+// Публичная функция
+int generate_passwords_from_args(int argc, char **argv) {
+    Options opts;
+    if(options_init(&opts) != 0) {
+        fprintf(stderr, "Error: Initialization failed (memory)\n");
+        return -1;
+    }
+
+    if(parse_options(argc, argv, &opts) != 0) {
+        options_free(&opts);
+        return -1;
+    }
+
+    generate_passwords(&opts);
+
+    options_free(&opts);
+    return 0;
+}
