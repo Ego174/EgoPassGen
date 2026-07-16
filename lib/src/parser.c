@@ -46,9 +46,6 @@ static bool is_positive_integer(const char *s) {
 }
 
 // Извлекает имя опции и возможное значение из аргумента.
-// Возвращает указатель на начало имени (внутри arg) или NULL.
-// *out_value: если есть значение в этом же аргументе – указатель на него, иначе NULL.
-// *name_len: длина имени опции.
 static const char *extract_option_name_and_value(const Options *opts, const char *arg,
                                                  const char **out_value, int *name_len) {
     if(arg[0] != '-') return NULL;
@@ -59,7 +56,6 @@ static const char *extract_option_name_and_value(const Options *opts, const char
     *name_len = len;
     if(p[len] != '\0') {
         const char *val_start = p + len;
-        // Если первый символ после имени – разделитель, пропускаем его
         if(is_delimiter(opts, val_start[0])) {
             val_start++;
         }
@@ -92,7 +88,6 @@ int parse_options(int argc, char **argv, Options *opts) {
         strncpy(opt_name, opt_start, name_len);
         opt_name[name_len] = '\0';
 
-        // Если значение не было в текущем аргументе, попробуем взять следующий аргумент (если он не опция)
         int next_delta = 0;
         if(!value) {
             if(i + 1 < argc && argv[i + 1][0] != '-') {
@@ -107,11 +102,11 @@ int parse_options(int argc, char **argv, Options *opts) {
             int delta = 0;
             if(value && strlen(value) == 1) {
                 delim_char = value;
-                delta = 1; // съели текущий аргумент
+                delta = 1;
             } else if(!value && i + 1 < argc && argv[i + 1][0] != '-') {
                 if(strlen(argv[i + 1]) == 1) {
                     delim_char = argv[i + 1];
-                    delta = 2; // съели текущий и следующий
+                    delta = 2;
                 }
             }
             if(!delim_char) {
@@ -165,22 +160,20 @@ int parse_options(int argc, char **argv, Options *opts) {
             requires_arg = true;
         } else if(strcmp(opt_name, "a") == 0) {
             known = true;
-            requires_arg = false; // может быть без аргумента
+            requires_arg = false;
         }
 
-        // Неизвестная опция – игнорируем
         if(!known) {
             i++;
             continue;
         }
 
-        // Если опция требует аргумент, но его нет – ошибка
         if(requires_arg && !value) {
             fprintf(stderr, "Error: Option -%s requires an argument\n", opt_name);
             return -1;
         }
 
-        // --- Обработка известных опций (кроме -d и -D) ---
+        // --- Обработка -minl ---
         if(strcmp(opt_name, "minl") == 0) {
             if(opts->has_minl) {
                 fprintf(stderr, "Error: Option -minl repeated\n");
@@ -200,6 +193,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
+        // --- -maxl ---
         if(strcmp(opt_name, "maxl") == 0) {
             if(opts->has_maxl) {
                 fprintf(stderr, "Error: Option -maxl repeated\n");
@@ -219,6 +213,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
+        // --- -n ---
         if(strcmp(opt_name, "n") == 0) {
             if(opts->has_fixed_len) {
                 fprintf(stderr, "Error: Option -n repeated\n");
@@ -238,6 +233,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
+        // --- -c ---
         if(strcmp(opt_name, "c") == 0) {
             if(opts->has_count) {
                 fprintf(stderr, "Error: Option -c repeated\n");
@@ -257,6 +253,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
+        // --- -a ---
         if(strcmp(opt_name, "a") == 0) {
             if(opts->has_alphabet) {
                 fprintf(stderr, "Error: Option -a repeated\n");
@@ -279,6 +276,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
+        // --- -C ---
         if(strcmp(opt_name, "C") == 0) {
             if(opts->has_categories) {
                 fprintf(stderr, "Error: Option -C repeated\n");
@@ -288,12 +286,23 @@ int parse_options(int argc, char **argv, Options *opts) {
                 fprintf(stderr, "Error: Option -C requires an argument (aADS)\n");
                 return -1;
             }
+            bool seen[4] = {false, false, false, false}; // a, A, D, S
             const char *p = value;
             while(*p) {
-                if(*p != 'a' && *p != 'A' && *p != 'D' && *p != 'S') {
+                int idx = -1;
+                if(*p == 'a') idx = 0;
+                else if(*p == 'A') idx = 1;
+                else if(*p == 'D') idx = 2;
+                else if(*p == 'S') idx = 3;
+                else {
                     fprintf(stderr, "Error: Option -C expects only characters a, A, D, S\n");
                     return -1;
                 }
+                if(seen[idx]) {
+                    fprintf(stderr, "Error: Duplicate character in -C argument\n");
+                    return -1;
+                }
+                seen[idx] = true;
                 p++;
             }
             if(strlen(value) > 4) {
@@ -307,6 +316,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
+        // --- -P (вероятности) ---
         if(strcmp(opt_name, "P") == 0) {
             if(opts->has_probs) {
                 fprintf(stderr, "Error: Option -P repeated\n");
@@ -380,7 +390,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // Если сюда дошли – что-то пошло не так, но игнорируем
+        // Неизвестная опция – игнорируем
         i++;
     }
 
