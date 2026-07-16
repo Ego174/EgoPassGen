@@ -1,5 +1,5 @@
 /*
-password_gen.c - Реализация основной функции генерации паролей
+password_gen.c - Реализация генерации паролей и публичной функции
 
 Хаиров Егор Вадимович
 МК-101
@@ -14,6 +14,7 @@ password_gen.c - Реализация основной функции генер
 #include <time.h>
 #include <math.h>
 
+// Вспомогательная функция для нормализации вероятностей (сумма = 1)
 static void normalize_probs(double *probs, int count) {
     double sum = 0.0;
     for(int i = 0; i < count; ++i) sum += probs[i];
@@ -24,20 +25,23 @@ static void normalize_probs(double *probs, int count) {
     }
 }
 
-static void generate_one_password(const Options *opts) {
+static void generate_passwords(const Options *opts) {
     // Определяем алфавит и вероятности
-    int alphabet_size;
+    int alphabet_size = 0;
     char *alphabet = NULL;
     double *probs = NULL;
+    bool free_alphabet = false;
+    bool free_probs = false;
 
     if(opts->alphabet_type == ALPHABET_TYPE_STRING) {
         alphabet = opts->alphabet_str;
         alphabet_size = strlen(alphabet);
         probs = malloc(alphabet_size * sizeof(double));
         if(!probs) {
-            fprintf(stderr, "Memory error\n");
+            fprintf(stderr, "Memory error in generation\n");
             return;
         }
+        free_probs = true;
         if(opts->has_probs) {
             int i;
             for(i = 0; i < opts->probs_count && i < alphabet_size; ++i) {
@@ -47,24 +51,20 @@ static void generate_one_password(const Options *opts) {
                 double remaining = 1.0;
                 for(int j = 0; j < i; ++j) remaining -= probs[j];
                 if(remaining < 0) {
-                    // Если сумма >1, нормализуем все
-                    for(int j = 0; j < alphabet_size; ++j) probs[j] = 0.0;
-                    for(int j = 0; j < i; ++j) probs[j] = opts->probs[j];
+                    // Если сумма уже > 1, нормализуем все
                     normalize_probs(probs, alphabet_size);
                 } else {
                     double each = remaining / (alphabet_size - i);
                     for(int j = i; j < alphabet_size; ++j) probs[j] = each;
                 }
             } else {
-                // ровно столько же вероятностей
-                // нормализуем на всякий случай
                 normalize_probs(probs, alphabet_size);
             }
         } else {
             for(int i = 0; i < alphabet_size; ++i) probs[i] = 1.0 / alphabet_size;
         }
-    }
-    else { // CATEGORIES
+    } else { // CATEGORIES
+        // Построим полный алфавит из категорий
         char full_alphabet[256];
         int full_size = 0;
         for(const char *cat = opts->categories; *cat; ++cat) {
@@ -78,27 +78,26 @@ static void generate_one_password(const Options *opts) {
                 case 'D':
                     for(char c = '0'; c <= '9'; ++c) full_alphabet[full_size++] = c;
                     break;
-                case 'S': {
-                    const char *specials = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
-                    for(const char *s = specials; *s; ++s) full_alphabet[full_size++] = *s;
+                case 'S':
+                    {
+                        const char *specials = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+                        for(const char *s = specials; *s; ++s) full_alphabet[full_size++] = *s;
+                    }
                     break;
-                }
             }
         }
         full_alphabet[full_size] = '\0';
         alphabet = strdup(full_alphabet);
-        alphabet_size = full_size;
-        probs = malloc(alphabet_size * sizeof(double));
-        if(!alphabet || !probs) {
-            fprintf(stderr, "Memory error\n");
-            free(probs);
-            free(alphabet);
+        if(!alphabet) {
+            fprintf(stderr, "Memory error in generation\n");
             return;
         }
+        free_alphabet = true;
+        alphabet_size = full_size;
 
+        // Получим вероятности категорий
         int cat_count = strlen(opts->categories);
-        double cat_probs[4];
-        for(int i = 0; i < cat_count; ++i) cat_probs[i] = 0.0;
+        double cat_probs[4] = {0};
         if(opts->has_probs) {
             for(int i = 0; i < opts->probs_count && i < cat_count; ++i) {
                 cat_probs[i] = opts->probs[i];
@@ -119,20 +118,29 @@ static void generate_one_password(const Options *opts) {
             for(int i = 0; i < cat_count; ++i) cat_probs[i] = 1.0 / cat_count;
         }
 
+        // Назначаем каждому символу вероятность категории / размер категории
+        probs = malloc(alphabet_size * sizeof(double));
+        if(!probs) {
+            fprintf(stderr, "Memory error in generation\n");
+            if(free_alphabet) free(alphabet);
+            return;
+        }
+        free_probs = true;
         int idx = 0;
+        int cat_index = 0;
         for(const char *cat = opts->categories; *cat; ++cat) {
-            int cat_size;
+            int cat_size = 0;
             switch(*cat) {
                 case 'a': cat_size = 26; break;
                 case 'A': cat_size = 26; break;
                 case 'D': cat_size = 10; break;
                 case 'S': cat_size = 32; break;
-                default: cat_size = 0;
             }
-            double prob_per_char = cat_probs[cat - opts->categories] / cat_size;
+            double prob_per_char = cat_probs[cat_index] / cat_size;
             for(int i = 0; i < cat_size; ++i) {
                 probs[idx++] = prob_per_char;
             }
+            cat_index++;
         }
         normalize_probs(probs, alphabet_size);
     }
@@ -143,7 +151,7 @@ static void generate_one_password(const Options *opts) {
         length = opts->fixed_len;
     } else {
         int min = opts->has_minl ? opts->min_len : 1;
-        int max = opts->has_maxl ? opts->max_len : 20;
+        int max = opts->has_maxl ? opts->max_len : 8; // если не заданы, используем 8
         if(!opts->has_minl && !opts->has_maxl) {
             length = 8;
         } else {
@@ -151,39 +159,34 @@ static void generate_one_password(const Options *opts) {
         }
     }
 
-    char *password = malloc(length + 1);
-    if(!password) {
-        fprintf(stderr, "Memory error\n");
-        free(probs);
-        if(opts->alphabet_type == ALPHABET_TYPE_CATEGORIES) free(alphabet);
-        return;
-    }
-    for(int i = 0; i < length; ++i) {
-        double r = (double)rand() / RAND_MAX;
-        double cum = 0.0;
-        int chosen = 0;
-        for(int j = 0; j < alphabet_size; ++j) {
-            cum += probs[j];
-            if(r <= cum) {
-                chosen = j;
-                break;
-            }
+    // Генерация каждого пароля
+    for(int p = 0; p < opts->count; ++p) {
+        char *password = malloc(length + 1);
+        if(!password) {
+            fprintf(stderr, "Memory error\n");
+            break;
         }
-        password[i] = alphabet[chosen];
+        for(int i = 0; i < length; ++i) {
+            double r = (double)rand() / RAND_MAX;
+            double cum = 0.0;
+            int chosen = 0;
+            for(int j = 0; j < alphabet_size; ++j) {
+                cum += probs[j];
+                if(r <= cum) {
+                    chosen = j;
+                    break;
+                }
+            }
+            password[i] = alphabet[chosen];
+        }
+        password[length] = '\0';
+        printf("%s\n", password);
+        free(password);
     }
-    password[length] = '\0';
-    printf("%s\n", password);
 
-    free(password);
-    free(probs);
-    if(opts->alphabet_type == ALPHABET_TYPE_CATEGORIES) free(alphabet);
-}
-
-static void generate_passwords(const Options *opts) {
-    srand((unsigned int)time(NULL));
-    for(int i = 0; i < opts->count; ++i) {
-        generate_one_password(opts);
-    }
+    // Освобождение временных ресурсов
+    if(free_probs) free(probs);
+    if(free_alphabet) free(alphabet);
 }
 
 // Публичная функция
@@ -199,6 +202,7 @@ int generate_passwords_from_args(int argc, char **argv) {
         return -1;
     }
 
+    srand((unsigned int)time(NULL));
     generate_passwords(&opts);
 
     options_free(&opts);
