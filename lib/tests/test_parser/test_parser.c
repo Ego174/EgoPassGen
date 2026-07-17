@@ -241,6 +241,32 @@ void test_D_with_multiple_chars(void) {
     options_free(&opts);
 }
 
+// 20. -a с прилегающим (слитным) аргументом (например, -aabc)
+void test_parse_a_joined_arg(void) {
+    Options opts;
+    options_init(&opts);
+    char *argv[] = {"prog", "-aabc"};
+    int ret = parse_options(2, argv, &opts);
+    TEST_ASSERT_EQUAL_INT(0, ret);
+    TEST_ASSERT_TRUE(opts.has_alphabet);
+    TEST_ASSERT_EQUAL_INT(ALPHABET_TYPE_STRING, opts.alphabet_type);
+    TEST_ASSERT_EQUAL_STRING("abc", opts.alphabet_str);
+    options_free(&opts);
+}
+
+// 21. -C с прилегающим (слитным) аргументом (например, -CaADS)
+void test_parse_C_joined_arg(void) {
+    Options opts;
+    options_init(&opts);
+    char *argv[] = {"prog", "-CaADS"};
+    int ret = parse_options(2, argv, &opts);
+    TEST_ASSERT_EQUAL_INT(0, ret);
+    TEST_ASSERT_TRUE(opts.has_categories);
+    TEST_ASSERT_EQUAL_INT(ALPHABET_TYPE_CATEGORIES, opts.alphabet_type);
+    TEST_ASSERT_EQUAL_STRING("aADS", opts.categories);
+    options_free(&opts);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_minl_maxl);
@@ -262,5 +288,7 @@ int main(void) {
     RUN_TEST(test_C_invalid_char);
     RUN_TEST(test_d_with_multiple_chars);
     RUN_TEST(test_D_with_multiple_chars);
+    RUN_TEST(test_parse_a_joined_arg);
+    RUN_TEST(test_parse_C_joined_arg);
     return UNITY_END();
 }

@@ -55,6 +55,51 @@ static const char *extract_option_name_and_value(const Options *opts, const char
                                                  const char **out_value, int *name_len) {
     if(arg[0] != '-') return NULL;
     const char *p = arg + 1;
+
+    // Сначала проверяем многосимвольные опции "minl" и "maxl"
+    if(strncmp(p, "minl", 4) == 0) {
+        *name_len = 4;
+        const char *val_start = p + 4;
+        if(val_start[0] != '\0') {
+            if(is_delimiter(opts, val_start[0])) {
+                val_start++;
+            }
+            *out_value = val_start;
+        } else {
+            *out_value = NULL;
+        }
+        return p;
+    }
+    if(strncmp(p, "maxl", 4) == 0) {
+        *name_len = 4;
+        const char *val_start = p + 4;
+        if(val_start[0] != '\0') {
+            if(is_delimiter(opts, val_start[0])) {
+                val_start++;
+            }
+            *out_value = val_start;
+        } else {
+            *out_value = NULL;
+        }
+        return p;
+    }
+
+    // Проверяем известные односимвольные опции
+    if(p[0] == 'n' || p[0] == 'c' || p[0] == 'C' || p[0] == 'P' || p[0] == 'a' || p[0] == 'd' || p[0] == 'D') {
+        *name_len = 1;
+        const char *val_start = p + 1;
+        if(val_start[0] != '\0') {
+            if(is_delimiter(opts, val_start[0])) {
+                val_start++;
+            }
+            *out_value = val_start;
+        } else {
+            *out_value = NULL;
+        }
+        return p;
+    }
+
+    // Возврат к стандартному разбору для остальных/неизвестных опций
     int len = 0;
     while(p[len] && isalpha(p[len])) len++;
     if(len == 0) return NULL;
