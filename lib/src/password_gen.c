@@ -25,6 +25,44 @@ static void normalize_probs(double *probs, int count) {
     }
 }
 
+// Дополнительная функция: распределяет оставшуюся вероятность между элементами со значением -1.0
+// и нормализует все вероятности
+static void finalize_probabilities(double *probs, int count) {
+    double sum_given = 0.0;
+    int unassigned_count = 0;
+    for(int i = 0; i < count; ++i) {
+        if(probs[i] >= 0.0) {
+            sum_given += probs[i];
+        } else {
+            unassigned_count++;
+        }
+    }
+    if(sum_given > 1.0) {
+        // Если сумма заданных > 1, просто нормализуем все (включая -1.0)
+        // Нормализация заменит -1.0 на 0, но мы их обработаем позже
+        // Проще: все элементы с -1.0 обнулим, а затем нормализуем все
+        for(int i = 0; i < count; ++i) {
+            if(probs[i] < 0.0) probs[i] = 0.0;
+        }
+        normalize_probs(probs, count);
+        return;
+    }
+    // Распределяем оставшуюся вероятность равномерно между незаданными
+    double remaining = 1.0 - sum_given;
+    if(unassigned_count > 0 && remaining >= 0) {
+        double each = remaining / unassigned_count;
+        for(int i = 0; i < count; ++i) {
+            if(probs[i] < 0.0) probs[i] = each;
+        }
+    } else {
+        // Если незаданных нет или remaining < 0, нормализуем все
+        for(int i = 0; i < count; ++i) {
+            if(probs[i] < 0.0) probs[i] = 0.0;
+        }
+        normalize_probs(probs, count);
+    }
+}
+
 // Генерирует и выводит пароли согласно опциям
 static void generate_passwords(const Options *opts) {
     int alphabet_size = 0;
@@ -44,26 +82,15 @@ static void generate_passwords(const Options *opts) {
         }
         free_probs = true;
 
+        // Если заданы вероятности, копируем их; иначе все равны
         if(opts->has_probs) {
-            int i;
-            for(i = 0; i < opts->probs_count && i < alphabet_size; ++i) {
+            // opts->probs уже должен быть массивом длины alphabet_size
+            for(int i = 0; i < alphabet_size; ++i) {
                 probs[i] = opts->probs[i];
             }
-            // Если вероятностей меньше, чем символов, оставшуюся вероятность распределяем равномерно
-            if(i < alphabet_size) {
-                double remaining = 1.0;
-                for(int j = 0; j < i; ++j) remaining -= probs[j];
-                if(remaining < 0) {
-                    normalize_probs(probs, alphabet_size);
-                } else {
-                    double each = remaining / (alphabet_size - i);
-                    for(int j = i; j < alphabet_size; ++j) probs[j] = each;
-                }
-            } else {
-                normalize_probs(probs, alphabet_size);
-            }
+            // Распределяем остаток и нормализуем
+            finalize_probabilities(probs, alphabet_size);
         } else {
-            // Без вероятностей – все равны
             for(int i = 0; i < alphabet_size; ++i) probs[i] = 1.0 / alphabet_size;
         }
     } else { // ALPHABET_TYPE_CATEGORIES
@@ -100,23 +127,13 @@ static void generate_passwords(const Options *opts) {
 
         // Получаем вероятности категорий
         int cat_count = strlen(opts->categories);
-        double cat_probs[4] = {0};
+        double cat_probs[4];
         if(opts->has_probs) {
-            for(int i = 0; i < opts->probs_count && i < cat_count; ++i) {
+            // opts->probs уже должен быть массивом длины cat_count
+            for(int i = 0; i < cat_count; ++i) {
                 cat_probs[i] = opts->probs[i];
             }
-            if(opts->probs_count < cat_count) {
-                double remaining = 1.0;
-                for(int i = 0; i < opts->probs_count; ++i) remaining -= cat_probs[i];
-                if(remaining < 0) {
-                    normalize_probs(cat_probs, cat_count);
-                } else {
-                    double each = remaining / (cat_count - opts->probs_count);
-                    for(int i = opts->probs_count; i < cat_count; ++i) cat_probs[i] = each;
-                }
-            } else {
-                normalize_probs(cat_probs, cat_count);
-            }
+            finalize_probabilities(cat_probs, cat_count);
         } else {
             for(int i = 0; i < cat_count; ++i) cat_probs[i] = 1.0 / cat_count;
         }
@@ -154,7 +171,7 @@ static void generate_passwords(const Options *opts) {
         length = opts->fixed_len;
     } else {
         int min = opts->has_minl ? opts->min_len : 1;
-        int max = opts->has_maxl ? opts->max_len : 8; // если не заданы, используем 8
+        int max = opts->has_maxl ? opts->max_len : 8;
         if(!opts->has_minl && !opts->has_maxl) {
             length = 8;
         } else {

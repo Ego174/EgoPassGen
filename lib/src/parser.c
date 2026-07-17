@@ -71,6 +71,139 @@ static const char *extract_option_name_and_value(const Options *opts, const char
     return p;
 }
 
+// Заполняет массив opts->probs на основе opts->probs_raw
+// Возвращает 0 при успехе, -1 при ошибке
+static int fill_probabilities(Options *opts) {
+    int count;
+    if(opts->alphabet_type == ALPHABET_TYPE_STRING) {
+        count = strlen(opts->alphabet_str);
+    } else {
+        count = strlen(opts->categories);
+    }
+    if(count == 0) {
+        fprintf(stderr, "Error: Empty alphabet, cannot assign probabilities\n");
+        return -1;
+    }
+
+    opts->probs = malloc(count * sizeof(double));
+    if(!opts->probs) {
+        fprintf(stderr, "Error: Memory allocation for probabilities\n");
+        return -1;
+    }
+    // Инициализируем все как -1.0 (означает "не задано")
+    for(int i = 0; i < count; ++i) opts->probs[i] = -1.0;
+
+    const char *s = opts->probs_raw;
+    // Проверяем, есть ли символ '='
+    bool has_equals = (strchr(s, '=') != NULL);
+
+    if(has_equals) {
+        // Формат: ключ=значение,ключ=значение,...
+        // Для -a ключ - символ, для -C ключ - a/A/D/S
+        char *work = strdup(s);
+        if(!work) {
+            fprintf(stderr, "Error: Memory allocation\n");
+            return -1;
+        }
+        char *token = strtok(work, ",");
+        int assigned_count = 0;
+        while(token) {
+            char *eq = strchr(token, '=');
+            if(!eq) {
+                fprintf(stderr, "Error: Invalid probability format (missing '=')\n");
+                free(work);
+                return -1;
+            }
+            *eq = '\0';
+            char *key = token;
+            char *val_str = eq + 1;
+            // Проверяем ключ
+            if(strlen(key) != 1) {
+                fprintf(stderr, "Error: Probability key must be a single character\n");
+                free(work);
+                return -1;
+            }
+            char key_char = key[0];
+            // Проверяем значение
+            char *end;
+            double val = strtod(val_str, &end);
+            if(end == val_str || val < 0) {
+                fprintf(stderr, "Error: Invalid probability value for key '%c'\n", key_char);
+                free(work);
+                return -1;
+            }
+            // Находим индекс
+            int idx = -1;
+            if(opts->alphabet_type == ALPHABET_TYPE_STRING) {
+                const char *pos = strchr(opts->alphabet_str, key_char);
+                if(!pos) {
+                    fprintf(stderr, "Error: Symbol '%c' not found in alphabet\n", key_char);
+                    free(work);
+                    return -1;
+                }
+                idx = pos - opts->alphabet_str;
+            } else {
+                // CATEGORIES: ключ должен быть a/A/D/S
+                const char *cat = strchr(opts->categories, key_char);
+                if(!cat) {
+                    fprintf(stderr, "Error: Category '%c' not in -C list\n", key_char);
+                    free(work);
+                    return -1;
+                }
+                idx = cat - opts->categories;
+            }
+            if(idx < 0 || idx >= count) {
+                fprintf(stderr, "Error: Internal index out of bounds\n");
+                free(work);
+                return -1;
+            }
+            if(opts->probs[idx] != -1.0) {
+                fprintf(stderr, "Error: Duplicate probability for key '%c'\n", key_char);
+                free(work);
+                return -1;
+            }
+            opts->probs[idx] = val;
+            assigned_count++;
+            token = strtok(NULL, ",");
+        }
+        free(work);
+    } else {
+        // Формат: список чисел по порядку
+        char *work = strdup(s);
+        if(!work) {
+            fprintf(stderr, "Error: Memory allocation\n");
+            return -1;
+        }
+        char *token = strtok(work, ",");
+        int idx = 0;
+        while(token) {
+            if(idx >= count) {
+                fprintf(stderr, "Error: Too many probabilities for alphabet\n");
+                free(work);
+                return -1;
+            }
+            char *end;
+            double val = strtod(token, &end);
+            if(end == token || val < 0) {
+                fprintf(stderr, "Error: Invalid probability value at position %d\n", idx);
+                free(work);
+                return -1;
+            }
+            opts->probs[idx] = val;
+            idx++;
+            token = strtok(NULL, ",");
+        }
+        free(work);
+        // Если чисел меньше, чем элементов, остальные остаются -1.0
+    }
+
+    // Освобождаем сырую строку, она больше не нужна
+    free(opts->probs_raw);
+    opts->probs_raw = NULL;
+
+    return 0;
+}
+
 // Основная функция разбора
 int parse_options(int argc, char **argv, Options *opts) {
     int i = 1;
@@ -294,7 +427,6 @@ int parse_options(int argc, char **argv, Options *opts) {
                 fprintf(stderr, "Error: Option -C requires an argument (aADS)\n");
                 return -1;
             }
-            // Проверяем допустимые символы
             const char *p = value;
             while(*p) {
                 if(*p != 'a' && *p != 'A' && *p != 'D' && *p != 'S') {
@@ -303,7 +435,6 @@ int parse_options(int argc, char **argv, Options *opts) {
                 }
                 p++;
             }
-            // Проверяем на дубликаты
             for(const char *p1 = value; *p1; ++p1) {
                 for(const char *p2 = p1 + 1; *p2; ++p2) {
                     if(*p1 == *p2) {
@@ -323,7 +454,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             continue;
         }
 
-        // -P (вероятности)
+        // -P (вероятности) – сохраняем сырую строку
         if(strcmp(opt_name, "P") == 0) {
             if(opts->has_probs) {
                 fprintf(stderr, "Error: Option -P repeated\n");
@@ -333,73 +464,26 @@ int parse_options(int argc, char **argv, Options *opts) {
                 fprintf(stderr, "Error: Option -P requires a list of probabilities\n");
                 return -1;
             }
-            // Подсчитываем количество чисел, разделённых запятыми
+            // Базовые проверки: допустимые символы (буквы, цифры, точка, запятая, равно)
             const char *s = value;
-            int count = 0;
-            int in_num = 0;
             while(*s) {
-                if(*s == ',') {
-                    if(in_num) { count++; in_num = 0; }
-                } else if(*s >= '0' && *s <= '9' || *s == '.' || *s == '-') {
-                    in_num = 1;
-                } else {
-                    fprintf(stderr, "Error: Invalid character in probability list\n");
+                char c = *s;
+                if(!(isalnum(c) || c == '.' || c == ',' || c == '=')) {
+                    fprintf(stderr, "Error: Invalid character in probability list: '%c'\n", c);
                     return -1;
                 }
                 s++;
             }
-            if(in_num) count++;
-            if(count == 0) {
-                fprintf(stderr, "Error: No probabilities found\n");
-                return -1;
-            }
-
-            // Выделяем память для вероятностей
-            opts->probs = malloc(count * sizeof(double));
-            if(!opts->probs) {
+            opts->probs_raw = strdup(value);
+            if(!opts->probs_raw) {
                 fprintf(stderr, "Error: Memory allocation for probabilities\n");
                 return -1;
-            }
-            opts->probs_count = count;
-
-            // Парсим числа
-            int idx = 0;
-            const char *start = value;
-            s = value;
-            while(*s) {
-                if(*s == ',') {
-                    if(s > start) {
-                        char *end;
-                        double val = strtod(start, &end);
-                        if(end == start || val < 0) {
-                            fprintf(stderr, "Error: Invalid probability value\n");
-                            free(opts->probs);
-                            opts->probs = NULL;
-                            return -1;
-                        }
-                        opts->probs[idx++] = val;
-                    }
-                    start = s + 1;
-                }
-                s++;
-            }
-            if(s > start) {
-                char *end;
-                double val = strtod(start, &end);
-                if(end == start || val < 0) {
-                    fprintf(stderr, "Error: Invalid probability value\n");
-                    free(opts->probs);
-                    opts->probs = NULL;
-                    return -1;
-                }
-                opts->probs[idx++] = val;
             }
             opts->has_probs = true;
             i += 1 + next_delta;
             continue;
         }
 
-        // Неизвестная опция – просто пропускаем
         i++;
     }
 
@@ -427,7 +511,7 @@ int parse_options(int argc, char **argv, Options *opts) {
         return -1;
     }
 
-    // Если не задан ни -a, ни -C, используем алфавит по умолчанию (все печатные ASCII)
+    // Устанавливаем алфавит по умолчанию, если не задан
     if(!opts->has_alphabet && !opts->has_categories) {
         char default_alphabet[95];
         int idx = 0;
@@ -441,7 +525,7 @@ int parse_options(int argc, char **argv, Options *opts) {
             fprintf(stderr, "Error: Memory allocation for default alphabet\n");
             return -1;
         }
-        opts->has_alphabet = true; // для внутреннего использования
+        opts->has_alphabet = true;
     }
 
     // Если -a была без аргумента, ставим алфавит по умолчанию
@@ -478,11 +562,9 @@ int parse_options(int argc, char **argv, Options *opts) {
         return -1;
     }
 
-    // Проверяем, что вероятностей не больше, чем элементов
+    // Обработка вероятностей (если заданы)
     if(opts->has_probs) {
-        int expected = (opts->alphabet_type == ALPHABET_TYPE_STRING) ? strlen(opts->alphabet_str) : strlen(opts->categories);
-        if(opts->probs_count > expected) {
-            fprintf(stderr, "Error: Too many probabilities, expected at most %d\n", expected);
+        if(fill_probabilities(opts) != 0) {
             return -1;
         }
     }
