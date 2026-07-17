@@ -90,23 +90,20 @@ static int fill_probabilities(Options *opts) {
         fprintf(stderr, "Error: Memory allocation for probabilities\n");
         return -1;
     }
-    // Инициализируем все как -1.0 (означает "не задано")
+    opts->probs_count = count;   // устанавливаем размер массива
     for(int i = 0; i < count; ++i) opts->probs[i] = -1.0;
 
     const char *s = opts->probs_raw;
-    // Проверяем, есть ли символ '='
     bool has_equals = (strchr(s, '=') != NULL);
 
     if(has_equals) {
         // Формат: ключ=значение,ключ=значение,...
-        // Для -a ключ - символ, для -C ключ - a/A/D/S
         char *work = strdup(s);
         if(!work) {
             fprintf(stderr, "Error: Memory allocation\n");
             return -1;
         }
         char *token = strtok(work, ",");
-        int assigned_count = 0;
         while(token) {
             char *eq = strchr(token, '=');
             if(!eq) {
@@ -117,14 +114,12 @@ static int fill_probabilities(Options *opts) {
             *eq = '\0';
             char *key = token;
             char *val_str = eq + 1;
-            // Проверяем ключ
             if(strlen(key) != 1) {
                 fprintf(stderr, "Error: Probability key must be a single character\n");
                 free(work);
                 return -1;
             }
             char key_char = key[0];
-            // Проверяем значение
             char *end;
             double val = strtod(val_str, &end);
             if(end == val_str || val < 0) {
@@ -132,7 +127,6 @@ static int fill_probabilities(Options *opts) {
                 free(work);
                 return -1;
             }
-            // Находим индекс
             int idx = -1;
             if(opts->alphabet_type == ALPHABET_TYPE_STRING) {
                 const char *pos = strchr(opts->alphabet_str, key_char);
@@ -143,7 +137,6 @@ static int fill_probabilities(Options *opts) {
                 }
                 idx = pos - opts->alphabet_str;
             } else {
-                // CATEGORIES: ключ должен быть a/A/D/S
                 const char *cat = strchr(opts->categories, key_char);
                 if(!cat) {
                     fprintf(stderr, "Error: Category '%c' not in -C list\n", key_char);
@@ -163,12 +156,11 @@ static int fill_probabilities(Options *opts) {
                 return -1;
             }
             opts->probs[idx] = val;
-            assigned_count++;
             token = strtok(NULL, ",");
         }
         free(work);
     } else {
-        // Формат: список чисел по порядку
+        // Старый формат: список чисел по порядку
         char *work = strdup(s);
         if(!work) {
             fprintf(stderr, "Error: Memory allocation\n");
@@ -194,13 +186,10 @@ static int fill_probabilities(Options *opts) {
             token = strtok(NULL, ",");
         }
         free(work);
-        // Если чисел меньше, чем элементов, остальные остаются -1.0
     }
 
-    // Освобождаем сырую строку, она больше не нужна
     free(opts->probs_raw);
     opts->probs_raw = NULL;
-
     return 0;
 }
 

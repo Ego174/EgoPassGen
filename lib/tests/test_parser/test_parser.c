@@ -18,7 +18,7 @@ void test_parse_minl_maxl(void) {
     Options opts;
     options_init(&opts);
     char *argv[] = {"prog", "-minl", "10", "-maxl", "20"};
-    int ret = parse_options(5, argv, &opts);          // argc = 5
+    int ret = parse_options(5, argv, &opts);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_TRUE(opts.has_minl);
     TEST_ASSERT_TRUE(opts.has_maxl);
@@ -99,7 +99,7 @@ void test_parse_a_and_C_incompatible(void) {
     options_free(&opts);
 }
 
-// 8. Корректный -P с вероятностями
+// 8. Корректный -P с вероятностями (новый формат: массив размером с алфавит)
 void test_parse_probabilities(void) {
     Options opts;
     options_init(&opts);
@@ -107,10 +107,13 @@ void test_parse_probabilities(void) {
     int ret = parse_options(5, argv, &opts);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_TRUE(opts.has_probs);
-    TEST_ASSERT_EQUAL_INT(3, opts.probs_count);
+    // теперь probs_count равен размеру алфавита (4)
+    TEST_ASSERT_EQUAL_INT(4, opts.probs_count);
     TEST_ASSERT_FLOAT_WITHIN(0.001, 0.1, opts.probs[0]);
     TEST_ASSERT_FLOAT_WITHIN(0.001, 0.2, opts.probs[1]);
     TEST_ASSERT_FLOAT_WITHIN(0.001, 0.3, opts.probs[2]);
+    // четвёртый не задан, должен быть -1.0
+    TEST_ASSERT_FLOAT_WITHIN(0.001, -1.0, opts.probs[3]);
     options_free(&opts);
 }
 
@@ -128,7 +131,6 @@ void test_parse_too_many_probs(void) {
 void test_parse_delimiter_add_and_use(void) {
     Options opts;
     options_init(&opts);
-    // используем разделитель '!' для -minl и -maxl
     char *argv[] = {"prog", "-d", "!", "-minl!10", "-maxl!20"};
     int ret = parse_options(5, argv, &opts);
     TEST_ASSERT_EQUAL_INT(0, ret);
